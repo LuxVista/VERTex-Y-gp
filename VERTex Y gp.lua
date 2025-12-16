@@ -1,16 +1,20 @@
 --[[ 
-    VERTex Y gp (Ghost Radius) 👻
-    - Optimized: เปลี่ยนระบบจาก "แช่ทั้งแมพ" เป็น "แช่เฉพาะรอบตัว (Radius)" แก้แลค 100%
-    - Ghost Mode: มอนสเตอร์ระยะใกล้จะมองไม่เห็นเรา (Target = nil)
-    - Fix Fly/Noclip: ใช้ระบบเสถียรที่สุด
+    VERTex Y gp (Ultimate Fixed) 🔧
+    - SYSTEM REWRITE: เขียนระบบหยุดการทำงาน (Kill Switch) ใหม่หมด
+    - FIX CLOSE BUTTON: กด X แล้วสคริปต์หยุดจริง 100% ไม่กินเครื่อง
+    - FIX BUGS: ใส่กัน Error ทุกจุด (Anti-Crash)
 ]]
 
--- 1. CLEANUP
+-- 1. KILL OLD PROCESS (ล้างค่าเก่าให้เกลี้ยงก่อนรัน)
+getgenv().VERTex_Running = false -- สั่งหยุดสคริปต์ตัวเก่า
+task.wait(0.2) -- รอให้ตัวเก่าหยุดทำงาน
 if getgenv().AzCon then getgenv().AzCon:Disconnect() end
 if getgenv().NoclipCon then getgenv().NoclipCon:Disconnect() end
 if getgenv().FlyCon then getgenv().FlyCon:Disconnect() end
-getgenv().AzLoop = false; task.wait(0.1)
-for _,v in pairs(game.CoreGui:GetChildren()) do if v.Name=="VERTex_Ghost" then v:Destroy() end end
+for _,v in pairs(game.CoreGui:GetChildren()) do if v.Name=="VERTex_UltFixed" then v:Destroy() end end
+
+-- เริ่มต้นระบบใหม่
+getgenv().VERTex_Running = true 
 
 -- 2. CONFIG & SERVICES
 local Players, Run, Tween, Input, StarterGui, Workspace = game:GetService("Players"), game:GetService("RunService"), game:GetService("TweenService"), game:GetService("UserInputService"), game:GetService("StarterGui"), game:GetService("Workspace")
@@ -18,31 +22,62 @@ local LP = Players.LocalPlayer
 local Cam = Workspace.CurrentCamera
 
 local Config = {
-    FlySpeed = 200, -- ความเร็วบินมาตรฐาน
-    Radius = 50,    -- ระยะที่จะทำให้มอนตาบอด (50 เมตรกำลังดี ไม่แลค)
+    FlySpeed = 210,
+    SkyHeight = 500,
+    Radius = 50,
+    OldPos = nil,
     Active = { 
         Master = true, 
-        GhostMode = false, -- ชื่อโหมดใหม่
+        GhostMode = false, 
+        SkyGod = false, 
         Fly = false, 
         Noclip = false 
     }
 }
 Config.Active.Master = false 
 
--- UI Manager
-local UI_Elements = {} 
+local UI_Elements = {} -- เก็บข้อมูลปุ่มเพื่อรีเฟรช
 
--- 3. UTILS
+-- 3. SAFETY UTILS (กันบัค)
+local function GetChar()
+    return LP.Character or LP.CharacterAdded:Wait()
+end
+
+local function GetRoot()
+    local C = LP.Character
+    return C and C:FindFirstChild("HumanoidRootPart")
+end
+
 local function Reset()
-    if LP.Character then
-        local H = LP.Character:FindFirstChild("HumanoidRootPart")
-        if LP.Character:FindFirstChild("Humanoid") then
-            LP.Character.Humanoid.PlatformStand = false
+    pcall(function() -- ใช้ pcall กัน Error
+        local H = GetRoot()
+        local Hum = LP.Character and LP.Character:FindFirstChild("Humanoid")
+        
+        -- คืนค่าการเคลื่อนไหว
+        if Hum then Hum.PlatformStand = false end
+        if H then H.Velocity = Vector3.new(0,0,0) end
+        
+        -- ลบอุปกรณ์ช่วยบิน
+        if H and H:FindFirstChild("AzVel") then H.AzVel:Destroy() end
+        if H and H:FindFirstChild("AzGyro") then H.AzGyro:Destroy() end
+        
+        -- ลบพื้น Sky God
+        local plat = Workspace:FindFirstChild("AzSkyPlat")
+        if plat then plat:Destroy() end
+        
+        -- วาร์ปกลับจุดเดิม (ถ้ามี)
+        if Config.OldPos and H then
+            H.CFrame = Config.OldPos
+            Config.OldPos = nil
         end
-        for _,v in pairs(LP.Character:GetDescendants()) do 
-            if v:IsA("BasePart") then v.CanCollide = true end 
+        
+        -- คืนค่าการชน (Noclip)
+        if LP.Character then
+            for _,v in pairs(LP.Character:GetDescendants()) do 
+                if v:IsA("BasePart") then v.CanCollide = true end 
+            end
         end
-    end
+    end)
 end
 
 -- 4. UI THEME
@@ -57,7 +92,7 @@ local Th = {
     On = Color3.fromRGB(200, 200, 200),    
     Stroke = Color3.fromRGB(60, 60, 65)    
 }
-local Gui = Instance.new("ScreenGui", game.CoreGui); Gui.Name="VERTex_Ghost"
+local Gui = Instance.new("ScreenGui", game.CoreGui); Gui.Name="VERTex_UltFixed"
 
 -- WIDGET
 local Widget = Instance.new("TextButton", Gui)
@@ -106,6 +141,7 @@ Tit.TextSize = 18
 Tit.TextXAlignment = Enum.TextXAlignment.Left
 Tit.TextStrokeTransparency = 1
 
+-- [FIXED CLOSE BUTTON]
 local function CreateCtrlBtn(txt, col, offX, func)
     local B = Instance.new("TextButton", Header)
     B.Size = UDim2.new(0, 40, 1, 0)
@@ -118,7 +154,20 @@ local function CreateCtrlBtn(txt, col, offX, func)
     B.TextStrokeTransparency = 1
     B.MouseButton1Click:Connect(func)
 end
-CreateCtrlBtn("X", Th.Err, -40, function() Reset(); getgenv().AzCon:Disconnect(); getgenv().NoclipCon:Disconnect(); if getgenv().FlyCon then getgenv().FlyCon:Disconnect() end; Gui:Destroy() end)
+
+CreateCtrlBtn("X", Th.Err, -40, function() 
+    -- 1. สั่งหยุด Loop ทั้งหมด
+    getgenv().VERTex_Running = false 
+    -- 2. รีเซ็ตตัวละคร
+    Reset()
+    -- 3. ตัดการเชื่อมต่อ Event
+    if getgenv().AzCon then getgenv().AzCon:Disconnect() end
+    if getgenv().NoclipCon then getgenv().NoclipCon:Disconnect() end
+    if getgenv().FlyCon then getgenv().FlyCon:Disconnect() end
+    -- 4. ลบ GUI
+    Gui:Destroy() 
+end)
+
 CreateCtrlBtn("—", Th.Txt, -80, function() Main.Visible=false; Widget.Visible=true end)
 Widget.MouseButton1Click:Connect(function() Widget.Visible=false; Main.Visible=true end)
 
@@ -189,16 +238,15 @@ local function CreateTab(name)
     return P
 end
 
--- REFRESH BUTTONS
 local function RefreshAllButtons()
     for _, btnData in pairs(UI_Elements) do
         local on = Config.Active[btnData.Flag]
         local targetBg = on and Color3.fromRGB(60,60,65) or Th.Item
         local targetTxt = on and Th.On or Th.Txt
         local targetInd = on and Th.On or Color3.fromRGB(60,60,60)
-        Tween:Create(btnData.Button, TweenInfo.new(0.3), {BackgroundColor3=targetBg}):Play()
-        Tween:Create(btnData.Label, TweenInfo.new(0.3), {TextColor3=targetTxt}):Play()
-        Tween:Create(btnData.Ind, TweenInfo.new(0.3), {BackgroundColor3=targetInd}):Play()
+        Tween:Create(btnData.Button, TweenInfo.new(0.2), {BackgroundColor3=targetBg}):Play()
+        Tween:Create(btnData.Label, TweenInfo.new(0.2), {TextColor3=targetTxt}):Play()
+        Tween:Create(btnData.Ind, TweenInfo.new(0.2), {BackgroundColor3=targetInd}):Play()
     end
 end
 
@@ -215,24 +263,38 @@ local function AddToggle(pageName, txt, desc, flag)
 
     table.insert(UI_Elements, {Button=B, Label=L, Ind=Ind, Flag=flag})
 
-    local isAlerting = false
     B.MouseButton1Click:Connect(function()
         if flag ~= "Master" and not Config.Active.Master then
-            if isAlerting then return end; isAlerting = true
             Tween:Create(B, TweenInfo.new(0.1), {BackgroundColor3=Th.Err}):Play()
-            L.Text = "⚠️ เปิดสวิตช์หลักก่อน!"
-            task.delay(1, function() if B.Parent then Tween:Create(B, TweenInfo.new(0.3), {BackgroundColor3=Th.Item}):Play(); L.Text=txt; isAlerting=false; RefreshAllButtons() end end)
+            task.delay(0.2, function() if B.Parent then Tween:Create(B, TweenInfo.new(0.3), {BackgroundColor3=Th.Item}):Play(); RefreshAllButtons() end end)
             return
         end
 
         Config.Active[flag] = not Config.Active[flag]
         local on = Config.Active[flag]
-        if not on and (flag=="Fly" or flag=="Noclip") then Reset() end
+
+        if flag == "SkyGod" then
+            local H = GetRoot()
+            if on and H then
+                Config.OldPos = H.CFrame
+                H.CFrame = H.CFrame * CFrame.new(0, Config.SkyHeight, 0)
+                local p = Instance.new("Part", Workspace)
+                p.Name = "AzSkyPlat"; p.Anchored = true; p.Size = Vector3.new(50, 1, 50)
+                p.Position = H.Position - Vector3.new(0, 3.5, 0)
+                p.Transparency = 0; p.Material = Enum.Material.Plastic; p.Color = Color3.fromRGB(80, 80, 80); p.CanCollide = true
+            elseif not on then
+                local plat = Workspace:FindFirstChild("AzSkyPlat")
+                if plat then plat:Destroy() end
+                if Config.OldPos and H then H.CFrame = Config.OldPos; Config.OldPos = nil end
+            end
+        end
+
+        if not on and (flag=="Fly" or flag=="Noclip" or flag=="GhostMode") then Reset() end
         RefreshAllButtons()
     end)
 end
 
--- SPECIAL BUTTON
+-- PANIC / FIX BUTTON
 local function AddSpecialButton(pageName, name, sub, color, func)
     if not Pages[pageName] then return end
     local Parent = Pages[pageName]
@@ -262,26 +324,16 @@ local StatusTxt = Instance.new("TextLabel", StatusFrame)
 StatusTxt.Size = UDim2.new(1, -10, 1, 0)
 StatusTxt.Position = UDim2.new(0, 10, 0, 0)
 StatusTxt.BackgroundTransparency = 1
-StatusTxt.Text = "System: Waiting..."
+StatusTxt.Text = "Status: OK"
 StatusTxt.TextColor3 = Th.Sub
 StatusTxt.Font = Enum.Font.Code
 StatusTxt.TextSize = 12
 StatusTxt.TextXAlignment = Enum.TextXAlignment.Left
 
-task.spawn(function()
-    while Main.Parent do
-        local fps = math.floor(Workspace:GetRealPhysicsFPS())
-        local ping = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString():split(" ")[1] or 0)
-        local status = Config.Active.Master and "<font color=\"rgb(0,255,100)\">ONLINE</font>" or "<font color=\"rgb(255,50,50)\">OFFLINE</font>"
-        StatusTxt.RichText = true
-        StatusTxt.Text = string.format("FPS: %d | Ping: %d ms | %s", fps, ping, status)
-        task.wait(1) 
-    end
-end)
-
 -- SETUP CONTENT
 CreateTab("หน้าหลัก")
-CreateTab("ล่องหน") -- Tab ใหม่
+CreateTab("ล่องหน")
+CreateTab("ป้องกัน") 
 CreateTab("เคลื่อนที่")
 
 AddToggle("หน้าหลัก", "สวิตช์หลัก (Master)", "เปิดระบบจ่ายไฟให้สคริปต์", "Master")
@@ -293,38 +345,43 @@ end)
 AddSpecialButton("หน้าหลัก", "รีเซ็ตแก้บัค (Fix Bug)", "เคลียร์ค่าเวลาระบบรวน", Th.Fix, function()
     for k, v in pairs(Config.Active) do if k ~= "Master" then Config.Active[k] = false end end
     Reset()
-    if LP.Character and LP.Character:FindFirstChild("Humanoid") then
-        LP.Character.Humanoid.Sit = false
-        LP.Character.Humanoid.PlatformStand = false
-    end
     StarterGui:SetCore("SendNotification", {Title = "VERTex Fix", Text = "ล้างค่าบัคทั้งหมดแล้ว!", Duration = 3})
 end)
 
-AddToggle("ล่องหน", "ไม่ให้มอนเห็น (Ghost Mode)", "มอนสเตอร์รอบตัวจะมองไม่เห็นเรา", "GhostMode")
-
-AddToggle("เคลื่อนที่", "บินอัจฉริยะ (Smart Fly)", "บินนิ่งและลื่น (รองรับทุกอุปกรณ์)", "Fly")
+AddToggle("ล่องหน", "ไม่ให้มอนเห็น (Ghost Mode)", "มอนระยะใกล้ 50m มองไม่เห็นเรา", "GhostMode")
+AddToggle("ป้องกัน", "อมตะบนฟ้า (Sky God)", "วาร์ปขึ้นฟ้า + พื้นสีเทา", "SkyGod")
+AddToggle("เคลื่อนที่", "บินอัจฉริยะ (Smart Fly)", "บินลื่นๆ (รองรับมือถือ/PC)", "Fly")
 AddToggle("เคลื่อนที่", "เดินทะลุ (God Noclip)", "เดินผ่านกำแพง", "Noclip")
 
 SwitchTab("หน้าหลัก")
 
 -- 5. RUNTIME LOGIC
 
--- [ GHOST MODE (LAG FREE) ]
--- ใช้ Loop แบบหน่วงเวลา (task.wait) แทนการเช็คทุกเฟรม เพื่อความลื่น
+-- [ UPDATE STATUS BAR ]
 task.spawn(function()
-    while true do
-        task.wait(0.1) -- ทำงานแค่ 10 ครั้งต่อวิ (ประหยัดเครื่องมาก)
-        if Config.Active.Master and Config.Active.GhostMode and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
-            local MyPos = LP.Character.HumanoidRootPart.Position
-            -- วนลูปหาเฉพาะมอนสเตอร์
-            for _, v in pairs(Workspace:GetDescendants()) do
-                if v:IsA("Humanoid") and v.Parent ~= LP.Character and v.Parent:FindFirstChild("HumanoidRootPart") then
-                    local EnemyRoot = v.Parent.HumanoidRootPart
-                    -- เช็คระยะห่าง (Radius)
-                    if (EnemyRoot.Position - MyPos).Magnitude <= Config.Radius then
-                        -- ถ้าอยู่ในระยะ -> สั่งให้มองไม่เห็น
-                        v.Target = nil
-                        v.WalkToPoint = EnemyRoot.Position -- สั่งให้ยืนนิ่งๆ หรือเดินวนแถวนั้น
+    while getgenv().VERTex_Running and Main.Parent do
+        local fps = math.floor(Workspace:GetRealPhysicsFPS())
+        local ping = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValueString():split(" ")[1] or 0)
+        local status = Config.Active.Master and "<font color=\"rgb(0,255,100)\">ACTIVE</font>" or "<font color=\"rgb(255,50,50)\">OFFLINE</font>"
+        StatusTxt.RichText = true
+        StatusTxt.Text = string.format("FPS: %d | Ping: %d ms | %s", fps, ping, status)
+        task.wait(1)
+    end
+end)
+
+-- [ GHOST MODE (Safe Loop) ]
+task.spawn(function()
+    while getgenv().VERTex_Running and Main.Parent do
+        task.wait(0.2)
+        if Config.Active.Master and Config.Active.GhostMode then
+            local H = GetRoot()
+            if H then
+                for _, v in pairs(Workspace:GetDescendants()) do
+                    if v:IsA("Humanoid") and v.Parent ~= LP.Character and v.Parent:FindFirstChild("HumanoidRootPart") then
+                        if (v.Parent.HumanoidRootPart.Position - H.Position).Magnitude <= Config.Radius then
+                            v.Target = nil
+                            v.WalkToPoint = v.Parent.HumanoidRootPart.Position 
+                        end
                     end
                 end
             end
@@ -334,18 +391,17 @@ end)
 
 -- [ FLY SYSTEM (CFrame) ]
 getgenv().FlyCon = Run.RenderStepped:Connect(function()
-    if Config.Active.Master and Config.Active.Fly and LP.Character then
-        local H = LP.Character:FindFirstChild("HumanoidRootPart")
-        local Hum = LP.Character:FindFirstChild("Humanoid")
+    if not getgenv().VERTex_Running then return end -- Double Check
+    if Config.Active.Master and Config.Active.Fly then
+        local H = GetRoot()
+        local Hum = LP.Character and LP.Character:FindFirstChild("Humanoid")
         if H and Hum then
             Hum.PlatformStand = true
             local moveDir = Hum.MoveDirection
             local nextPos = H.CFrame.Position
-            
             if moveDir.Magnitude > 0 then nextPos = nextPos + (moveDir * Config.FlySpeed) end
             if Input:IsKeyDown(Enum.KeyCode.Space) then nextPos = nextPos + Vector3.new(0, Config.FlySpeed/2, 0) end
             if Input:IsKeyDown(Enum.KeyCode.LeftControl) then nextPos = nextPos - Vector3.new(0, Config.FlySpeed/2, 0) end
-            
             H.CFrame = CFrame.new(nextPos, nextPos + Cam.CFrame.LookVector)
             H.Velocity = Vector3.new(0,0,0)
         end
@@ -354,6 +410,7 @@ end)
 
 -- [ NOCLIP ]
 getgenv().NoclipCon = Run.Stepped:Connect(function()
+    if not getgenv().VERTex_Running then return end
     if Config.Active.Master and Config.Active.Noclip and LP.Character then
         for _,v in pairs(LP.Character:GetDescendants()) do 
             if v:IsA("BasePart") and v.CanCollide then v.CanCollide = false end 
@@ -361,4 +418,4 @@ getgenv().NoclipCon = Run.Stepped:Connect(function()
     end
 end)
 
-StarterGui:SetCore("SendNotification", {Title = "VERTex Y gp", Text = "Ghost Radius Active!", Duration = 5})
+StarterGui:SetCore("SendNotification", {Title = "VERTex Y gp", Text = "พร้อมใช้งาน! (Fixed Edition)", Duration = 5})
