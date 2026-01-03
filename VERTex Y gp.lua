@@ -23,7 +23,7 @@ local Cam = Workspace.CurrentCamera
 
 local Config = {
     FlySpeed = 210,
-    SkyHeight = 500,
+    SkyHeight = 50,
     Radius = 50,
     OldPos = nil,
     Active = { 
